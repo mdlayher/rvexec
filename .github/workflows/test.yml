@@ -23,6 +23,13 @@ jobs:
       run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt && rustup component add clippy
       shell: bash
 
+    - name: Install riscv64 tools
+      run: sudo apt-get update -y && sudo apt-get install build-essential binutils-riscv64-linux-gnu
+      shell: bash
+
+    - name: Assemble test binaries
+      run: make -C ./asm
+
     - name: Check code formatting
       run: cargo fmt --all -- --check
 
@@ -31,3 +38,6 @@ jobs:
 
     - name: Run tests
       run: cargo test --all
+
+    - name: Run rvexec
+      run: cargo run
