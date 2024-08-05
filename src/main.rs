@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Ok, Result};
+use anyhow::{anyhow, Result};
 use byteorder::ReadBytesExt;
 use elf::abi;
 use elf::endian::LittleEndian;
@@ -66,7 +66,7 @@ fn main() {
                 while (data.len() - cursor.position() as usize) > 0 {
                     let buf = cursor.read_u32::<byteorder::LE>().unwrap();
 
-                    let inst = Instruction::from(buf);
+                    let inst = Instruction::try_from(buf).expect("parse instruction");
                     println!("    {}", inst);
                 }
             }
@@ -230,6 +230,8 @@ impl<'a> AttributeParser<'a> {
     }
 }
 
+// TODO(mdlayher): swap in ABI name registers.
+
 enum Register {
     X0,
     X1,
@@ -348,19 +350,26 @@ impl fmt::Display for Register {
 
 #[derive(Debug)]
 enum Instruction {
-    None,
     System(System),
     IType(IType),
     UType(UType),
 }
 
-impl From<u32> for Instruction {
-    fn from(value: u32) -> Self {
-        match value & 0x7f {
-            0b0010011 => Self::IType(IType(value)),
-            0b0011011 | 0b00010111 => Self::UType(UType(value)),
-            0b1110011 => Self::System(System(value)),
-            _ => Self::None,
+impl TryFrom<u32> for Instruction {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        // Mask off to find the opcode and then pass the raw value for each type
+        // to interpret the entire value as an instruction of a given format.
+        //
+        // Reference:
+        // https://github.com/jameslzhu/riscv-card/blob/master/riscv-card.pdf
+        let masked = value & 0x7f;
+        match masked {
+            0b0010011 => Ok(Self::IType(IType(value))),
+            0b0011011 | 0b00010111 => Ok(Self::UType(UType(value))),
+            0b1110011 => Ok(Self::System(System(value))),
+            _ => Err(anyhow!("no matching opcode: {:#02x}", masked)),
         }
     }
 }
@@ -368,29 +377,37 @@ impl From<u32> for Instruction {
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::System(system) => {
+                let inst = match Inst::try_from(system) {
+                    Ok(inst) => inst.to_string(),
+                    Err(_) => "system(???)".to_string(),
+                };
+
+                write!(f, "{}", inst)
+            }
             Self::IType(itype) => {
+                let inst = match Inst::try_from(itype) {
+                    Ok(inst) => inst.to_string(),
+                    Err(_) => "itype(???)".to_string(),
+                };
+
                 write!(
                     f,
                     "{} {}, {}, {}",
-                    itype.inst().unwrap(),
+                    inst,
                     itype.rd(),
                     itype.rs1(),
                     itype.immediate(),
                 )
             }
-            Self::System(system) => {
-                write!(f, "{}", system.inst().unwrap())
-            }
             Self::UType(utype) => {
-                write!(
-                    f,
-                    "{} {}, {}",
-                    utype.inst().unwrap(),
-                    utype.rd(),
-                    utype.immediate(),
-                )
+                let inst = match Inst::try_from(utype) {
+                    Ok(inst) => inst.to_string(),
+                    Err(_) => "utype(???)".to_string(),
+                };
+
+                write!(f, "{} {}, {}", inst, utype.rd(), utype.immediate(),)
             }
-            Self::None => write!(f, "illegal"),
         }
     }
 }
@@ -399,16 +416,23 @@ impl fmt::Display for Instruction {
 struct System(u32);
 
 impl System {
-    fn inst(&self) -> Option<Inst> {
-        match self.immediate() {
-            0x0 => Some(Inst::ECALL),
-            0x1 => Some(Inst::EBREAK),
-            _ => None,
-        }
-    }
-
     fn immediate(&self) -> u32 {
         self.0 >> 20
+    }
+}
+
+impl TryFrom<&System> for Inst {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &System) -> Result<Self, Self::Error> {
+        match value.immediate() {
+            0x0 => Ok(Inst::ECALL),
+            0x1 => Ok(Inst::EBREAK),
+            _ => Err(anyhow!(
+                "unhandled system immediate: {:#02x}",
+                value.immediate(),
+            )),
+        }
     }
 }
 
@@ -416,13 +440,6 @@ impl System {
 struct IType(u32);
 
 impl IType {
-    fn inst(&self) -> Option<Inst> {
-        match self.funct3() {
-            0x0 => Some(Inst::ADDI),
-            _ => None,
-        }
-    }
-
     fn funct3(&self) -> u8 {
         ((self.0 >> 12) & 0x07) as u8
     }
@@ -440,24 +457,39 @@ impl IType {
     }
 }
 
+impl TryFrom<&IType> for Inst {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &IType) -> Result<Self, Self::Error> {
+        match value.funct3() {
+            0x0 => Ok(Inst::ADDI),
+            _ => Err(anyhow!("unhandled I-Type funct3: {:#02x}", value.funct3())),
+        }
+    }
+}
+
 #[derive(Debug)]
 
 struct UType(u32);
 
 impl UType {
-    fn inst(&self) -> Option<Inst> {
-        match self.0 & 0x7f {
-            0b00010111 => Some(Inst::AUIPC),
-            _ => None,
-        }
-    }
-
     fn rd(&self) -> Register {
         Register::from(self.0 >> 7 & 0x1f)
     }
 
     fn immediate(&self) -> u32 {
         self.0 >> 20
+    }
+}
+
+impl TryFrom<&UType> for Inst {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &UType) -> Result<Self, Self::Error> {
+        match value.0 & 0x7f {
+            0b00010111 => Ok(Inst::AUIPC),
+            _ => Err(anyhow!("unhandled U-Type opcode: {:#02x}", value.0 & 0x7f)),
+        }
     }
 }
 
@@ -474,10 +506,40 @@ impl fmt::Display for Inst {
         let op = match self {
             Self::ADDI => "addi",
             Self::AUIPC => "auipc",
-            Self::ECALL => "ecall",
             Self::EBREAK => "ebreak",
+            Self::ECALL => "ecall",
         };
 
         write!(f, "{}", op)
     }
+}
+
+#[test]
+fn test_instruction_illegal() {
+    let err = Instruction::try_from(0x00000000).unwrap_err();
+    assert_eq!("no matching opcode: 0x0", err.to_string());
+}
+
+#[test]
+fn test_instruction_addi() {
+    let inst = Instruction::try_from(0x00100513).unwrap();
+    assert_eq!("addi x10, x0, 1", inst.to_string());
+}
+
+#[test]
+fn test_instruction_auipc() {
+    let inst = Instruction::try_from(0x00001597).unwrap();
+    assert_eq!("auipc x11, 0", inst.to_string());
+}
+
+#[test]
+fn test_instruction_ebreak() {
+    let inst = Instruction::try_from(0x00100073).unwrap();
+    assert_eq!("ebreak", inst.to_string());
+}
+
+#[test]
+fn test_instruction_ecall() {
+    let inst = Instruction::try_from(0x00000073).unwrap();
+    assert_eq!("ecall", inst.to_string());
 }
