@@ -36,6 +36,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "riscv64"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "elf",
+ "residua-uleb128",
+]
+
+[[package]]
 name = "rvexec"
 version = "0.1.0"
 dependencies = [
@@ -43,4 +53,5 @@ dependencies = [
  "byteorder",
  "elf",
  "residua-uleb128",
+ "riscv64",
 ]
