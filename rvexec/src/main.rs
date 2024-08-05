@@ -3,7 +3,7 @@ use byteorder::ReadBytesExt;
 use elf::abi;
 use elf::endian::LittleEndian;
 use elf::file::Class;
-use riscv64::{asm, rvelf};
+use riscv64::{asm, cpu, rvelf};
 use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
@@ -60,14 +60,20 @@ fn main() {
             }
             (".text", abi::SHT_PROGBITS) => {
                 let mut cursor = Cursor::new(data);
+                let mut cpu = cpu::Cpu::default();
 
                 println!("assembly:");
                 while (data.len() - cursor.position() as usize) > 0 {
                     let buf = cursor.read_u32::<byteorder::LE>().unwrap();
 
                     let inst = asm::Instruction::try_from(buf).expect("parse instruction");
+                    let _ = cpu.execute(&inst);
+
                     println!("    {}", inst);
                 }
+
+                println!("cpu:");
+                dbg!(cpu);
             }
             (".data", abi::SHT_PROGBITS) => {
                 //dbg!(data);
