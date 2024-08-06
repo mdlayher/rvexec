@@ -80,6 +80,7 @@ impl Cpu {
     pub fn execute(&mut self, inst: &Instruction) -> Result<()> {
         let res = match inst {
             Instruction::IType(itype) => self.execute_itype(itype),
+            Instruction::SType(stype) => self.execute_stype(stype),
             Instruction::UType(utype) => self.execute_utype(utype),
         };
 
@@ -108,6 +109,15 @@ impl Cpu {
         }
 
         Ok(())
+    }
+
+    fn execute_stype(&mut self, stype: &asm::SType) -> Result<()> {
+        let _inst = match asm::STypeInst::try_from(stype) {
+            Ok(inst) => inst,
+            Err(err) => return Err(Error::UnknownInstruction(err)),
+        };
+
+        panic!("cannot execute S-Type yet: {}", stype);
     }
 
     fn execute_utype(&mut self, utype: &asm::UType) -> Result<()> {

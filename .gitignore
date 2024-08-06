@@ -1,2 +1,4 @@
 /target
-asm/hello
+*.o
+*.elf
+asm/sum/sum.s

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let path = "./asm/hello";
+    let path = "./asm/hello/hello.elf";
 
     let file = fs::read(PathBuf::from(path)).expect("open hello binary");
 
