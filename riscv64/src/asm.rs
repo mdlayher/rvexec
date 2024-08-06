@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::fmt;
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 #[repr(u32)]
 pub enum Register {
     X0,
@@ -45,7 +45,7 @@ impl TryFrom<u32> for Register {
         match value {
             // Safety: Register is repr(u32) and values 0-31 are valid register
             // numbers.
-            0..31 => Ok(unsafe { std::mem::transmute::<u32, Register>(value) }),
+            0..32 => Ok(unsafe { std::mem::transmute::<u32, Register>(value) }),
             _ => Err(anyhow!("unknown register number: {}", value)),
         }
     }
@@ -116,8 +116,8 @@ impl TryFrom<u32> for Instruction {
         // https://github.com/jameslzhu/riscv-card/blob/master/riscv-card.pdf
         let masked = value & 0x7f;
         match masked {
-            0b0010011 | 0b1110011 => Ok(Self::IType(IType(value))),
-            0b0011011 | 0b00010111 => Ok(Self::UType(UType(value))),
+            0b0001_0011 | 0b0111_0011 => Ok(Self::IType(IType(value))),
+            0b0001_1011 | 0b0001_0111 => Ok(Self::UType(UType(value))),
             _ => Err(anyhow!("no matching opcode: {:#02x}", masked)),
         }
     }
@@ -162,11 +162,11 @@ impl TryFrom<&IType> for ITypeInst {
 
     fn try_from(value: &IType) -> Result<Self, Self::Error> {
         match value.opcode() {
-            0b00010011 => match value.funct3() {
+            0b0001_0011 => match value.funct3() {
                 0x0 => Ok(ITypeInst::ADDI),
                 _ => Err(anyhow!("unhandled I-Type funct3: {:#02x}", value.funct3())),
             },
-            0b01110011 => match value.immediate() {
+            0b0111_0011 => match value.immediate() {
                 // System immediates.
                 0x0 => Ok(ITypeInst::ECALL),
                 0x1 => Ok(ITypeInst::EBREAK),
@@ -232,12 +232,12 @@ impl UType {
         (self.0 & 0x7f) as u8
     }
 
-    fn rd(&self) -> Register {
+    pub fn rd(&self) -> Register {
         Register::try_from(self.0 >> 7 & 0x1f).expect("rd must occupy exactly 5 bits")
     }
 
-    fn immediate(&self) -> u32 {
-        self.0 >> 20
+    pub fn immediate(&self) -> u32 {
+        self.0 >> 12
     }
 }
 
@@ -293,7 +293,7 @@ fn test_instruction_addi() {
 #[test]
 fn test_instruction_auipc() {
     let inst = Instruction::try_from(0x00001597).unwrap();
-    assert_eq!("auipc a1, 0", inst.to_string());
+    assert_eq!("auipc a1, 1", inst.to_string());
 }
 
 #[test]
