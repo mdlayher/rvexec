@@ -102,6 +102,7 @@ impl fmt::Display for Register {
 #[derive(Debug)]
 pub enum Instruction {
     IType(IType),
+    RType(RType),
     SType(SType),
     UType(UType),
 }
@@ -118,6 +119,7 @@ impl TryFrom<u32> for Instruction {
         let masked = value & 0x7f;
         match masked {
             0b0001_0011 | 0b0111_0011 => Ok(Self::IType(IType(value))),
+            0b0011_0011 => Ok(Self::RType(RType(value))),
             0b0010_0011 => Ok(Self::SType(SType(value))),
             0b0001_1011 | 0b0001_0111 => Ok(Self::UType(UType(value))),
             _ => Err(anyhow!("no matching opcode: {:#02x}", masked)),
@@ -129,6 +131,7 @@ impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::IType(itype) => itype.fmt(f),
+            Self::RType(rtype) => rtype.fmt(f),
             Self::SType(stype) => stype.fmt(f),
             Self::UType(utype) => utype.fmt(f),
         }
@@ -222,6 +225,84 @@ impl fmt::Display for ITypeInst {
             Self::ADDI => "addi",
             Self::EBREAK => "ebreak",
             Self::ECALL => "ecall",
+        };
+
+        write!(f, "{}", op)
+    }
+}
+
+#[derive(Debug)]
+pub struct RType(u32);
+
+impl RType {
+    fn opcode(&self) -> u8 {
+        (self.0 & 0x7f) as u8
+    }
+
+    fn funct3(&self) -> u8 {
+        ((self.0 >> 12) & 0x07) as u8
+    }
+
+    fn funct7(&self) -> u8 {
+        ((self.0 >> 25) & 0x7f) as u8
+    }
+
+    pub fn rs1(&self) -> Register {
+        Register::try_from(self.0 >> 15 & 0x1f).expect("rs1 must occupy exactly 5 bits")
+    }
+
+    pub fn rs2(&self) -> Register {
+        Register::try_from(self.0 >> 20 & 0xf).expect("rs2 must occupy exactly 4 bits")
+    }
+
+    pub fn rd(&self) -> Register {
+        Register::try_from(self.0 >> 7 & 0x1f).expect("rd must occupy exactly 5 bits")
+    }
+}
+
+impl fmt::Display for RType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match RTypeInst::try_from(self) {
+            Ok(inst) => match inst {
+                RTypeInst::ADD | RTypeInst::SUB => {
+                    write!(f, "{} {}, {}, {}", inst, self.rd(), self.rs1(), self.rs2())
+                }
+            },
+            Err(_) => write!(f, "rtype(???)"),
+        }
+    }
+}
+
+#[allow(clippy::upper_case_acronyms)]
+pub enum RTypeInst {
+    ADD,
+    SUB,
+}
+
+impl TryFrom<&RType> for RTypeInst {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &RType) -> Result<Self, Self::Error> {
+        match value.opcode() {
+            0b0011_0011 => match (value.funct3(), value.funct7()) {
+                (0x0, 0x00) => Ok(Self::ADD),
+                (0x0, 0x20) => Ok(Self::SUB),
+                _ => Err(anyhow!(
+                    "unhandled R-Type funct3: {:#02x}, funct7: {:#02x}",
+                    value.funct3(),
+                    value.funct7()
+                )),
+            },
+            _ => Err(anyhow!("unhandled R-Type opcode: {:#02x}", value.opcode())),
+        }
+    }
+}
+
+impl fmt::Display for RTypeInst {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let op = match self {
+            Self::ADD => "add",
+            Self::SUB => "sub",
         };
 
         write!(f, "{}", op)
@@ -365,6 +446,19 @@ fn test_instruction_illegal() {
 }
 
 #[test]
+fn test_instruction_add() {
+    let tests = [
+        (0x000002b3, "add t0, x0, x0"),
+        (0x00a28333, "add t1, t0, a0"),
+    ];
+
+    for test in tests {
+        let inst = Instruction::try_from(test.0).unwrap();
+        assert_eq!(test.1, inst.to_string());
+    }
+}
+
+#[test]
 fn test_instruction_addi() {
     let tests = [
         (0x00100513, "addi a0, x0, 1"),
@@ -402,6 +496,16 @@ fn test_instruction_sd() {
         (0x00113423, "sd ra, 8(sp)"),
         (0x00813023, "sd s0, 0(sp)"),
     ];
+
+    for test in tests {
+        let inst = Instruction::try_from(test.0).unwrap();
+        assert_eq!(test.1, inst.to_string());
+    }
+}
+
+#[test]
+fn test_instruction_sub() {
+    let tests = [(0x40650e33, "sub t3, a0, t1")];
 
     for test in tests {
         let inst = Instruction::try_from(test.0).unwrap();
