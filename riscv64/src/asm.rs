@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use std::fmt;
 
 macro_rules! impl_opcode {
@@ -79,7 +79,7 @@ pub enum Register {
 }
 
 impl TryFrom<u32> for Register {
-    type Error = anyhow::Error;
+    type Error = Error;
 
     fn try_from(value: u32) -> Result<Self> {
         match value {
@@ -141,14 +141,14 @@ impl fmt::Display for Register {
 
 #[derive(Debug)]
 pub enum Instruction {
-    IType(IType),
-    RType(RType),
-    SType(SType),
-    UType(UType),
+    I(IType),
+    R(RType),
+    S(SType),
+    U(UType),
 }
 
 impl TryFrom<u32> for Instruction {
-    type Error = anyhow::Error;
+    type Error = Error;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         // Mask off to find the opcode and then pass the raw value for each type
@@ -158,10 +158,10 @@ impl TryFrom<u32> for Instruction {
         // https://github.com/jameslzhu/riscv-card/blob/master/riscv-card.pdf
         let masked = value & 0x7f;
         match masked {
-            0b0001_0011 | 0b0111_0011 => Ok(Self::IType(IType(value))),
-            0b0011_0011 => Ok(Self::RType(RType(value))),
-            0b0010_0011 => Ok(Self::SType(SType(value))),
-            0b0001_1011 | 0b0001_0111 => Ok(Self::UType(UType(value))),
+            0b0001_0011 | 0b0111_0011 => Ok(Self::I(IType(value))),
+            0b0011_0011 => Ok(Self::R(RType(value))),
+            0b0010_0011 => Ok(Self::S(SType(value))),
+            0b0001_1011 | 0b0001_0111 => Ok(Self::U(UType(value))),
             _ => Err(anyhow!("no matching opcode: {:#02x}", masked)),
         }
     }
@@ -170,10 +170,10 @@ impl TryFrom<u32> for Instruction {
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::IType(itype) => itype.fmt(f),
-            Self::RType(rtype) => rtype.fmt(f),
-            Self::SType(stype) => stype.fmt(f),
-            Self::UType(utype) => utype.fmt(f),
+            Self::I(itype) => itype.fmt(f),
+            Self::R(rtype) => rtype.fmt(f),
+            Self::S(stype) => stype.fmt(f),
+            Self::U(utype) => utype.fmt(f),
         }
     }
 }
@@ -194,7 +194,7 @@ impl IType {
 }
 
 impl TryFrom<&IType> for ITypeInst {
-    type Error = anyhow::Error;
+    type Error = Error;
 
     fn try_from(value: &IType) -> Result<Self, Self::Error> {
         match value.opcode() {
@@ -295,7 +295,7 @@ pub enum RTypeInst {
 }
 
 impl TryFrom<&RType> for RTypeInst {
-    type Error = anyhow::Error;
+    type Error = Error;
 
     fn try_from(value: &RType) -> Result<Self, Self::Error> {
         match value.opcode() {
@@ -343,7 +343,7 @@ impl SType {
 }
 
 impl TryFrom<&SType> for STypeInst {
-    type Error = anyhow::Error;
+    type Error = Error;
 
     fn try_from(value: &SType) -> Result<Self, Self::Error> {
         match value.opcode() {

@@ -1,69 +1,31 @@
 use crate::asm::{self, Instruction, Register};
-use anyhow::anyhow;
-use byteorder::ByteOrder;
+use crate::bus::Bus;
 use std::os::fd::BorrowedFd;
 use thiserror::Error;
-
-// TODO(mdlayher): make configurable when splitting out memory.
-const MEMORY_SIZE: usize = 128 * 1024;
-const BASE_ADDR: usize = 0x0;
 
 #[derive(Debug, Default)]
 pub struct Cpu {
     registers: [u64; 32],
     pc: usize,
-    memory: Vec<u8>,
+    // TODO(mdlayher): borrow bus instead?
+    bus: Bus,
 }
 
 impl Cpu {
-    pub fn new(elf_bytes: &[u8]) -> Result<Self> {
-        let mut cpu = Self {
-            registers: [0; 32],
-            pc: 0,
-            memory: vec![0; MEMORY_SIZE],
-        };
-
-        cpu.load_elf(elf_bytes)?;
-
+    pub fn new(bus: Bus, pc: usize) -> Self {
         // TODO(mdlayher): stack pointer.
-
-        Ok(cpu)
-    }
-
-    fn load_elf(&mut self, buf: &[u8]) -> Result<()> {
-        // The CPU assumes ELF riscv64/little-endian/executable.
-        let elf_bytes = elf::ElfBytes::<elf::endian::LittleEndian>::minimal_parse(buf)
-            .map_err(|err| Error::InvalidBinary(anyhow!("failed to read ELF binary: {err}")))?;
-
-        let program_headers = elf_bytes.segments().ok_or(Error::InvalidBinary(anyhow!(
-            "found no ELF program headers"
-        )))?;
-
-        for ph in program_headers
-            .iter()
-            .filter(|ph| ph.p_type == elf::abi::PT_LOAD)
-        {
-            // For each loadable segment, calculate the appropriate offsets and
-            // load the program code and data into memory.
-            let start = BASE_ADDR + ph.p_vaddr as usize;
-            let end = start + ph.p_memsz as usize;
-
-            let offset = ph.p_offset as usize;
-
-            self.memory[start..end].copy_from_slice(&buf[offset..offset + ph.p_filesz as usize]);
+        Self {
+            registers: [0; 32],
+            pc,
+            bus,
         }
-
-        // Start PC at the entrypoint.
-        self.pc = BASE_ADDR + elf_bytes.ehdr.e_entry as usize;
-
-        Ok(())
     }
 
     pub fn fetch(&mut self) -> Result<Instruction> {
         // All instructions are 4 bytes.
         //
         // TODO(mdlayher): compressed instructions.
-        let word = byteorder::LE::read_u32(&self.memory[self.pc..self.pc + 4]);
+        let word = self.bus.load_u32(self.pc);
         let ret = Instruction::try_from(word).map_err(Error::UnknownInstruction);
 
         if ret.is_ok() {
@@ -82,10 +44,10 @@ impl Cpu {
 
     pub fn execute(&mut self, inst: &Instruction) -> Result<()> {
         let res = match inst {
-            Instruction::IType(itype) => self.execute_itype(itype),
-            Instruction::RType(rtype) => self.execute_rtype(rtype),
-            Instruction::SType(stype) => self.execute_stype(stype),
-            Instruction::UType(utype) => self.execute_utype(utype),
+            Instruction::I(itype) => self.execute_itype(itype),
+            Instruction::R(rtype) => self.execute_rtype(rtype),
+            Instruction::S(stype) => self.execute_stype(stype),
+            Instruction::U(utype) => self.execute_utype(utype),
         };
 
         // Increment PC _after_ processing to make sure instructions that use
@@ -187,7 +149,7 @@ impl Cpu {
                 let addr = self.read_register(Register::A1) as usize;
                 let len = self.read_register(Register::A2) as usize;
 
-                match nix::unistd::write(fd, &self.memory[addr..addr + len]) {
+                match nix::unistd::write(fd, self.bus.read_at(addr, len)) {
                     Ok(n) => Ok((n as u64, 0)),
                     // XXX(mdlayher): figure out errno return convention.
                     Err(errno) => panic!("write errno: {}", errno),
@@ -209,7 +171,7 @@ impl Cpu {
         let imm = stype.immediate() as usize;
         let rs2 = self.read_register(stype.rs2());
 
-        byteorder::LittleEndian::write_u64(&mut self.memory[rs1 + imm..rs1 + imm + 8], rs2);
+        self.bus.store_u64(rs1 + imm, rs2)
     }
 
     fn read_register(&self, reg: asm::Register) -> u64 {

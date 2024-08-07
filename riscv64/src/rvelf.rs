@@ -5,13 +5,11 @@ use uleb128::ReadULeb128Ext;
 
 #[derive(Debug)]
 pub struct Attributes {
-    pub format_version: char,
     pub sub_sections: Vec<AttributesSubSection>,
 }
 
 #[derive(Debug)]
 pub struct AttributesSubSection {
-    pub length: u32,
     pub vendor_name: String,
     pub sub_sections: Vec<AttributesSubSubSection>,
 }
@@ -19,7 +17,6 @@ pub struct AttributesSubSection {
 #[derive(Debug)]
 pub struct AttributesSubSubSection {
     pub tag: u32,
-    pub length: u32,
     pub tags: Vec<AttributesTag>,
 }
 
@@ -63,10 +60,7 @@ impl<'a> AttributeParser<'a> {
             sub_sections.push(sub_section);
         }
 
-        Ok(Attributes {
-            format_version,
-            sub_sections,
-        })
+        Ok(Attributes { sub_sections })
     }
 
     fn parse_sub_section(&mut self) -> Result<Option<AttributesSubSection>> {
@@ -74,7 +68,7 @@ impl<'a> AttributeParser<'a> {
             return Ok(None);
         }
 
-        let length = self.cursor.read_u32::<byteorder::LE>()?;
+        let _length = self.cursor.read_u32::<byteorder::LE>()?;
         let vendor_name = self.read_ntbs()?;
 
         let mut sub_sub_sections = Vec::new();
@@ -83,7 +77,6 @@ impl<'a> AttributeParser<'a> {
         }
 
         Ok(Some(AttributesSubSection {
-            length,
             vendor_name,
             sub_sections: sub_sub_sections,
         }))
@@ -95,18 +88,14 @@ impl<'a> AttributeParser<'a> {
         }
 
         let tag = self.cursor.read_uleb128_u32()?;
-        let sub_sub_length = self.cursor.read_u32::<byteorder::LE>()?;
+        let _sub_sub_length = self.cursor.read_u32::<byteorder::LE>()?;
 
         let mut tags = Vec::new();
         while let Some(tag) = self.parse_attribute_tag()? {
             tags.push(tag);
         }
 
-        Ok(Some(AttributesSubSubSection {
-            tag,
-            length: sub_sub_length,
-            tags,
-        }))
+        Ok(Some(AttributesSubSubSection { tag, tags }))
     }
 
     fn parse_attribute_tag(&mut self) -> Result<Option<AttributesTag>> {

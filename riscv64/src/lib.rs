@@ -1,3 +1,7 @@
-pub mod asm;
-pub mod cpu;
-pub mod rvelf;
+mod asm;
+mod bus;
+mod cpu;
+mod emulator;
+mod rvelf;
+
+pub use emulator::Emulator;
