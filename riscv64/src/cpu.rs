@@ -24,6 +24,9 @@ impl Cpu {
         };
 
         cpu.load_elf(elf_bytes)?;
+
+        // TODO(mdlayher): stack pointer.
+
         Ok(cpu)
     }
 
@@ -122,12 +125,16 @@ impl Cpu {
     }
 
     fn execute_stype(&mut self, stype: &asm::SType) -> Result<()> {
-        let _inst = match asm::STypeInst::try_from(stype) {
+        let inst = match asm::STypeInst::try_from(stype) {
             Ok(inst) => inst,
             Err(err) => return Err(Error::UnknownInstruction(err)),
         };
 
-        panic!("cannot execute S-Type yet: {}", stype);
+        match inst {
+            asm::STypeInst::SD => self.execute_sd(stype),
+        }
+
+        Ok(())
     }
 
     fn execute_utype(&mut self, utype: &asm::UType) -> Result<()> {
@@ -192,6 +199,17 @@ impl Cpu {
                 Err(Error::Exit(code))
             }
         }
+    }
+
+    fn execute_sd(&mut self, stype: &asm::SType) {
+        // XXX(mdlayher): verify correctness.
+
+        // M[rs1+imm] = rs2
+        let rs1 = self.read_register(stype.rs1()) as usize;
+        let imm = stype.immediate() as usize;
+        let rs2 = self.read_register(stype.rs2());
+
+        byteorder::LittleEndian::write_u64(&mut self.memory[rs1 + imm..rs1 + imm + 8], rs2);
     }
 
     fn read_register(&self, reg: asm::Register) -> u64 {

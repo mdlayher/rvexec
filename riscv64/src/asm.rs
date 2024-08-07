@@ -27,7 +27,7 @@ macro_rules! impl_rs1 {
 
 macro_rules! impl_rs2 {
     () => {
-        fn rs2(&self) -> Register {
+        pub fn rs2(&self) -> Register {
             Register::try_from(self.0 >> 20 & 0xf).expect("rs2 must occupy exactly 4 bits")
         }
     };
@@ -333,7 +333,7 @@ impl SType {
     impl_rs1!();
     impl_rs2!();
 
-    fn immediate(&self) -> i32 {
+    pub fn immediate(&self) -> i32 {
         // XXX(mdlayher): I'm pretty sure this is still wrong.
         let imm_1 = self.0 as i32 >> 25;
         let imm_2 = (self.0 as i32 >> 7) & 0x1f;
