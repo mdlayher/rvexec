@@ -36,6 +36,10 @@ impl Bus {
         LittleEndian::write_u64(&mut self.memory[addr..addr + 8], value);
     }
 
+    pub fn load_i8(&self, addr: usize) -> i8 {
+        self.memory[addr] as i8
+    }
+
     pub fn load_u32(&self, addr: usize) -> u32 {
         LittleEndian::read_u32(&self.memory[addr..addr + 4])
     }

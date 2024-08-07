@@ -11,6 +11,16 @@ pub struct Cpu {
     bus: Bus,
 }
 
+#[derive(Debug, Default, PartialEq)]
+pub struct TermState {
+    registers: [u64; 32],
+}
+
+#[derive(Default)]
+struct ExecuteState {
+    pc_next: Option<usize>,
+}
+
 impl Cpu {
     pub fn new(bus: Bus, pc: usize) -> Self {
         // TODO(mdlayher): stack pointer.
@@ -28,8 +38,8 @@ impl Cpu {
         let word = self.bus.load_u32(self.pc);
         let ret = Instruction::try_from(word).map_err(Error::UnknownInstruction);
 
+        // Debugging.
         if ret.is_ok() {
-            // Debugging.
             println!(
                 "fetch: {:#010x}-{:#010x}, word: {:#010x}, asm: {}",
                 self.pc,
@@ -37,26 +47,75 @@ impl Cpu {
                 word,
                 Instruction::try_from(word).unwrap(),
             );
+        } else {
+            println!(
+                "fetch: {:#010x}-{:#010x}, word: {:#010x}, asm: TODO",
+                self.pc,
+                self.pc + 4,
+                word,
+            );
         }
 
         ret
     }
 
     pub fn execute(&mut self, inst: &Instruction) -> Result<()> {
-        let res = match inst {
+        let state = match inst {
+            Instruction::B(btype) => self.execute_btype(btype),
             Instruction::I(itype) => self.execute_itype(itype),
             Instruction::R(rtype) => self.execute_rtype(rtype),
             Instruction::S(stype) => self.execute_stype(stype),
             Instruction::U(utype) => self.execute_utype(utype),
-        };
+        }?;
 
         // Increment PC _after_ processing to make sure instructions that use
         // the PC work properly.
-        self.pc += 4;
-        res
+        match state.pc_next {
+            // Jump instruction modified PC.
+            Some(pc) => self.pc = pc,
+            // No jump, move to the next word.
+            None => self.pc += 4,
+        };
+
+        Ok(())
     }
 
-    fn execute_itype(&mut self, itype: &asm::IType) -> Result<()> {
+    #[cfg(test)]
+    fn terminate(self) -> TermState {
+        // Terminate and consume the CPU, returning the final execution state.
+        TermState {
+            registers: self.registers,
+        }
+    }
+
+    fn execute_btype(&self, btype: &asm::BType) -> Result<ExecuteState> {
+        let inst = match asm::BTypeInst::try_from(btype) {
+            Ok(inst) => inst,
+            Err(err) => return Err(Error::UnknownInstruction(err)),
+        };
+
+        let state = match inst {
+            asm::BTypeInst::BEQ => self.execute_beq(btype),
+        };
+
+        Ok(state)
+    }
+
+    fn execute_beq(&self, btype: &asm::BType) -> ExecuteState {
+        // if (rs1 == rs2) pc += imm
+        let rs1 = self.read_register(btype.rs1());
+        let rs2 = self.read_register(btype.rs2());
+
+        let pc_next = if rs1 == rs2 {
+            Some(self.pc + btype.immediate() as usize)
+        } else {
+            None
+        };
+
+        ExecuteState { pc_next }
+    }
+
+    fn execute_itype(&mut self, itype: &asm::IType) -> Result<ExecuteState> {
         let inst = match asm::ITypeInst::try_from(itype) {
             Ok(inst) => inst,
             Err(err) => return Err(Error::UnknownInstruction(err)),
@@ -72,21 +131,39 @@ impl Cpu {
                 self.write_register(Register::A0, ret0);
                 self.write_register(Register::A1, ret1);
             }
+            asm::ITypeInst::LB => self.execute_lb(itype),
         }
 
-        Ok(())
+        Ok(ExecuteState::default())
     }
 
-    fn execute_rtype(&mut self, rtype: &asm::RType) -> Result<()> {
-        let _inst = match asm::RTypeInst::try_from(rtype) {
+    fn execute_rtype(&mut self, rtype: &asm::RType) -> Result<ExecuteState> {
+        let inst = match asm::RTypeInst::try_from(rtype) {
             Ok(inst) => inst,
             Err(err) => return Err(Error::UnknownInstruction(err)),
         };
 
-        panic!("cannot execute R-Type yet: {}", rtype);
+        match inst {
+            asm::RTypeInst::ADD | asm::RTypeInst::SUB => self.execute_rtype_arithmetic(inst, rtype),
+        }
+
+        Ok(ExecuteState::default())
     }
 
-    fn execute_stype(&mut self, stype: &asm::SType) -> Result<()> {
+    fn execute_rtype_arithmetic(&mut self, inst: asm::RTypeInst, rtype: &asm::RType) {
+        // rd = rs1 (op) rs2
+        let rs1 = self.read_register(rtype.rs1());
+        let rs2 = self.read_register(rtype.rs2());
+
+        let res = match inst {
+            asm::RTypeInst::ADD => rs1 + rs2,
+            asm::RTypeInst::SUB => rs1 - rs2,
+        };
+
+        self.write_register(rtype.rd(), res)
+    }
+
+    fn execute_stype(&mut self, stype: &asm::SType) -> Result<ExecuteState> {
         let inst = match asm::STypeInst::try_from(stype) {
             Ok(inst) => inst,
             Err(err) => return Err(Error::UnknownInstruction(err)),
@@ -96,10 +173,10 @@ impl Cpu {
             asm::STypeInst::SD => self.execute_sd(stype),
         }
 
-        Ok(())
+        Ok(ExecuteState::default())
     }
 
-    fn execute_utype(&mut self, utype: &asm::UType) -> Result<()> {
+    fn execute_utype(&mut self, utype: &asm::UType) -> Result<ExecuteState> {
         let inst = match asm::UTypeInst::try_from(utype) {
             Ok(inst) => inst,
             Err(err) => return Err(Error::UnknownInstruction(err)),
@@ -109,7 +186,7 @@ impl Cpu {
             asm::UTypeInst::AUIPC => self.execute_auipc(utype),
         }
 
-        Ok(())
+        Ok(ExecuteState::default())
     }
 
     fn execute_addi(&mut self, itype: &asm::IType) {
@@ -127,7 +204,7 @@ impl Cpu {
         )
     }
 
-    fn execute_ecall(&mut self) -> Result<(u64, u64)> {
+    fn execute_ecall(&self) -> Result<(u64, u64)> {
         // syscall(2) on Linux states the following conventions:
         //
         // Arch/ABI    Instruction           System  Ret  Ret  Error
@@ -161,6 +238,13 @@ impl Cpu {
                 Err(Error::Exit(code))
             }
         }
+    }
+
+    fn execute_lb(&mut self, itype: &asm::IType) {
+        // rd = M[rs1+imm][0:7]
+        let rs1 = self.read_register(itype.rs1()) as usize;
+        let value = self.bus.load_i8(rs1 + itype.immediate() as usize);
+        self.write_register(itype.rd(), value as u64);
     }
 
     fn execute_sd(&mut self, stype: &asm::SType) {
@@ -239,10 +323,19 @@ pub enum Error {
 
 #[test]
 fn test_cpu_execute_addi() {
-    let inst = Instruction::try_from(0x00100513).unwrap();
-
     let mut cpu = Cpu::default();
-    cpu.execute(&inst).unwrap();
+
+    let words = [0x00100513, 0x00250613];
+    for word in words {
+        let inst = Instruction::try_from(word).expect("parse instruction");
+        cpu.execute(&inst).expect("execute instruction");
+    }
+
+    let mut want = TermState::default();
+    want.registers[Register::A0 as usize] = 0x01;
+    want.registers[Register::A2 as usize] = 0x03;
+
+    assert_eq!(want, cpu.terminate());
 }
 
 #[test]

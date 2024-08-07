@@ -141,6 +141,7 @@ impl fmt::Display for Register {
 
 #[derive(Debug)]
 pub enum Instruction {
+    B(BType),
     I(IType),
     R(RType),
     S(SType),
@@ -158,7 +159,8 @@ impl TryFrom<u32> for Instruction {
         // https://github.com/jameslzhu/riscv-card/blob/master/riscv-card.pdf
         let masked = value & 0x7f;
         match masked {
-            0b0001_0011 | 0b0111_0011 => Ok(Self::I(IType(value))),
+            0b0110_0011 => Ok(Self::B(BType(value))),
+            0b0001_0011 | 0b0111_0011 | 0b0000_0011 => Ok(Self::I(IType(value))),
             0b0011_0011 => Ok(Self::R(RType(value))),
             0b0010_0011 => Ok(Self::S(SType(value))),
             0b0001_1011 | 0b0001_0111 => Ok(Self::U(UType(value))),
@@ -170,11 +172,78 @@ impl TryFrom<u32> for Instruction {
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::B(btype) => btype.fmt(f),
             Self::I(itype) => itype.fmt(f),
             Self::R(rtype) => rtype.fmt(f),
             Self::S(stype) => stype.fmt(f),
             Self::U(utype) => utype.fmt(f),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct BType(u32);
+
+impl BType {
+    impl_opcode!();
+    impl_funct3!();
+    impl_rs1!();
+    impl_rs2!();
+
+    pub fn immediate(&self) -> i32 {
+        // XXX(mdlayher): I'm pretty sure this is still wrong.
+        let imm_1 = self.0 as i32 >> 25;
+        let imm_2 = (self.0 as i32 >> 7) & 0x1f;
+
+        imm_1 << 5 | imm_2
+    }
+}
+
+impl fmt::Display for BType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match BTypeInst::try_from(self) {
+            Ok(inst) => match inst {
+                BTypeInst::BEQ => write!(
+                    f,
+                    "{} {}, {}, {}",
+                    inst,
+                    self.rs1(),
+                    self.rs2(),
+                    self.immediate()
+                ),
+            },
+            Err(_) => write!(f, "btype(???)"),
+        }
+    }
+}
+
+#[allow(clippy::upper_case_acronyms)]
+pub enum BTypeInst {
+    BEQ,
+}
+
+impl TryFrom<&BType> for BTypeInst {
+    type Error = Error;
+
+    fn try_from(value: &BType) -> Result<Self, Self::Error> {
+        match (value.opcode(), value.funct3()) {
+            (0b0110_0011, 0x0) => Ok(Self::BEQ),
+            _ => Err(anyhow!(
+                "unhandled B-Type opcode: {:#02x}, funct3: {:#02x}",
+                value.opcode(),
+                value.funct3()
+            )),
+        }
+    }
+}
+
+impl fmt::Display for BTypeInst {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let op = match self {
+            Self::BEQ => "beq",
+        };
+
+        write!(f, "{}", op)
     }
 }
 
@@ -200,7 +269,17 @@ impl TryFrom<&IType> for ITypeInst {
         match value.opcode() {
             0b0001_0011 => match value.funct3() {
                 0x0 => Ok(ITypeInst::ADDI),
-                _ => Err(anyhow!("unhandled I-Type funct3: {:#02x}", value.funct3())),
+                _ => Err(anyhow!(
+                    "unhandled I-Type immediate funct3: {:#02x}",
+                    value.funct3()
+                )),
+            },
+            0b0000_0011 => match value.funct3() {
+                0x0 => Ok(ITypeInst::LB),
+                _ => Err(anyhow!(
+                    "unhandled I-Type load funct3: {:#02x}",
+                    value.funct3()
+                )),
             },
             0b0111_0011 => match value.immediate() {
                 // System immediates.
@@ -221,6 +300,14 @@ impl fmt::Display for IType {
         match ITypeInst::try_from(self) {
             Ok(inst) => match inst {
                 ITypeInst::EBREAK | ITypeInst::ECALL => inst.fmt(f),
+                ITypeInst::LB => write!(
+                    f,
+                    "{} {}, {}({})",
+                    inst,
+                    self.rd(),
+                    self.immediate(),
+                    self.rs1(),
+                ),
                 _ => write!(
                     f,
                     "{} {}, {}, {}",
@@ -246,6 +333,7 @@ pub enum ITypeInst {
     ADDI,
     EBREAK,
     ECALL,
+    LB,
 }
 
 impl fmt::Display for ITypeInst {
@@ -254,6 +342,7 @@ impl fmt::Display for ITypeInst {
             Self::ADDI => "addi",
             Self::EBREAK => "ebreak",
             Self::ECALL => "ecall",
+            Self::LB => "lb",
         };
 
         write!(f, "{}", op)
@@ -477,6 +566,16 @@ fn test_instruction_auipc() {
 }
 
 #[test]
+fn test_instruction_beq() {
+    let tests = [(0x00030663, "beq t1, x0, 12")];
+
+    for test in tests {
+        let inst = Instruction::try_from(test.0).unwrap();
+        assert_eq!(test.1, inst.to_string());
+    }
+}
+
+#[test]
 fn test_instruction_ebreak() {
     let inst = Instruction::try_from(0x00100073).unwrap();
     assert_eq!("ebreak", inst.to_string());
@@ -486,6 +585,16 @@ fn test_instruction_ebreak() {
 fn test_instruction_ecall() {
     let inst = Instruction::try_from(0x00000073).unwrap();
     assert_eq!("ecall", inst.to_string());
+}
+
+#[test]
+fn test_instruction_lb() {
+    let tests = [(0x00030303, "lb t1, 0(t1)")];
+
+    for test in tests {
+        let inst = Instruction::try_from(test.0).unwrap();
+        assert_eq!(test.1, inst.to_string());
+    }
 }
 
 #[test]
