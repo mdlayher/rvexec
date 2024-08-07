@@ -160,7 +160,7 @@ impl TryFrom<u32> for Instruction {
         let masked = value & 0x7f;
         match masked {
             0b0110_0011 => Ok(Self::B(BType(value))),
-            0b0001_0011 | 0b0111_0011 | 0b0000_0011 => Ok(Self::I(IType(value))),
+            0b0001_0011 | 0b0111_0011 | 0b0000_0011 | 0b0110_0111 => Ok(Self::I(IType(value))),
             0b0011_0011 => Ok(Self::R(RType(value))),
             0b0010_0011 => Ok(Self::S(SType(value))),
             0b0001_1011 | 0b0001_0111 => Ok(Self::U(UType(value))),
@@ -290,6 +290,13 @@ impl TryFrom<&IType> for ITypeInst {
                     value.immediate()
                 )),
             },
+            0b0110_0111 => match value.funct3() {
+                0x0 => Ok(ITypeInst::JALR),
+                _ => Err(anyhow!(
+                    "unhandled I-Type jump funct3: {:#02x}",
+                    value.funct3()
+                )),
+            },
             _ => Err(anyhow!("unhandled I-Type opcode: {:#02x}", value.opcode())),
         }
     }
@@ -300,7 +307,7 @@ impl fmt::Display for IType {
         match ITypeInst::try_from(self) {
             Ok(inst) => match inst {
                 ITypeInst::EBREAK | ITypeInst::ECALL => inst.fmt(f),
-                ITypeInst::LB => write!(
+                ITypeInst::JALR | ITypeInst::LB => write!(
                     f,
                     "{} {}, {}({})",
                     inst,
@@ -333,6 +340,7 @@ pub enum ITypeInst {
     ADDI,
     EBREAK,
     ECALL,
+    JALR,
     LB,
 }
 
@@ -342,6 +350,7 @@ impl fmt::Display for ITypeInst {
             Self::ADDI => "addi",
             Self::EBREAK => "ebreak",
             Self::ECALL => "ecall",
+            Self::JALR => "jalr",
             Self::LB => "lb",
         };
 
@@ -585,6 +594,16 @@ fn test_instruction_ebreak() {
 fn test_instruction_ecall() {
     let inst = Instruction::try_from(0x00000073).unwrap();
     assert_eq!("ecall", inst.to_string());
+}
+
+#[test]
+fn test_instruction_jalr() {
+    let tests = [(0x00008067, "jalr x0, 0(ra)")];
+
+    for test in tests {
+        let inst = Instruction::try_from(test.0).unwrap();
+        assert_eq!(test.1, inst.to_string());
+    }
 }
 
 #[test]

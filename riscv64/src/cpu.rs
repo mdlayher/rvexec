@@ -121,7 +121,7 @@ impl Cpu {
             Err(err) => return Err(Error::UnknownInstruction(err)),
         };
 
-        match inst {
+        let state = match inst {
             asm::ITypeInst::ADDI => self.execute_addi(itype),
             asm::ITypeInst::EBREAK => return Err(Error::UnimplementedInstruction("ebreak")),
             asm::ITypeInst::ECALL => {
@@ -130,11 +130,14 @@ impl Cpu {
                 let (ret0, ret1) = self.execute_ecall()?;
                 self.write_register(Register::A0, ret0);
                 self.write_register(Register::A1, ret1);
-            }
-            asm::ITypeInst::LB => self.execute_lb(itype),
-        }
 
-        Ok(ExecuteState::default())
+                ExecuteState::default()
+            }
+            asm::ITypeInst::JALR => self.execute_jalr(itype),
+            asm::ITypeInst::LB => self.execute_lb(itype),
+        };
+
+        Ok(state)
     }
 
     fn execute_rtype(&mut self, rtype: &asm::RType) -> Result<ExecuteState> {
@@ -189,11 +192,13 @@ impl Cpu {
         Ok(ExecuteState::default())
     }
 
-    fn execute_addi(&mut self, itype: &asm::IType) {
+    fn execute_addi(&mut self, itype: &asm::IType) -> ExecuteState {
         // rd = rs1 + imm
         let rs1 = self.read_register(itype.rs1());
         let add = rs1 + itype.immediate() as u64;
-        self.write_register(itype.rd(), add)
+        self.write_register(itype.rd(), add);
+
+        ExecuteState::default()
     }
 
     fn execute_auipc(&mut self, utype: &asm::UType) {
@@ -240,11 +245,24 @@ impl Cpu {
         }
     }
 
-    fn execute_lb(&mut self, itype: &asm::IType) {
+    fn execute_jalr(&mut self, itype: &asm::IType) -> ExecuteState {
+        // rd = pc + 4; pc = rs1 + imm
+        self.write_register(itype.rd(), self.pc as u64 + 4);
+
+        let rs1 = self.read_register(itype.rs1()) as usize;
+
+        ExecuteState {
+            pc_next: Some(rs1 + itype.immediate() as usize),
+        }
+    }
+
+    fn execute_lb(&mut self, itype: &asm::IType) -> ExecuteState {
         // rd = M[rs1+imm][0:7]
         let rs1 = self.read_register(itype.rs1()) as usize;
         let value = self.bus.load_i8(rs1 + itype.immediate() as usize);
         self.write_register(itype.rd(), value as u64);
+
+        ExecuteState::default()
     }
 
     fn execute_sd(&mut self, stype: &asm::SType) {
