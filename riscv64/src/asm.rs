@@ -1,6 +1,46 @@
 use anyhow::{anyhow, Result};
 use std::fmt;
 
+macro_rules! impl_opcode {
+    () => {
+        fn opcode(&self) -> u8 {
+            (self.0 & 0x7f) as u8
+        }
+    };
+}
+
+macro_rules! impl_funct3 {
+    () => {
+        fn funct3(&self) -> u8 {
+            ((self.0 >> 12) & 0x07) as u8
+        }
+    };
+}
+
+macro_rules! impl_rs1 {
+    () => {
+        pub fn rs1(&self) -> Register {
+            Register::try_from(self.0 >> 15 & 0x1f).expect("rs1 must occupy exactly 5 bits")
+        }
+    };
+}
+
+macro_rules! impl_rs2 {
+    () => {
+        fn rs2(&self) -> Register {
+            Register::try_from(self.0 >> 20 & 0xf).expect("rs2 must occupy exactly 4 bits")
+        }
+    };
+}
+
+macro_rules! impl_rd {
+    () => {
+        pub fn rd(&self) -> Register {
+            Register::try_from(self.0 >> 7 & 0x1f).expect("rd must occupy exactly 5 bits")
+        }
+    };
+}
+
 #[derive(Debug, PartialEq)]
 #[repr(u32)]
 pub enum Register {
@@ -142,21 +182,10 @@ impl fmt::Display for Instruction {
 pub struct IType(u32);
 
 impl IType {
-    fn opcode(&self) -> u8 {
-        (self.0 & 0x7f) as u8
-    }
-
-    fn funct3(&self) -> u8 {
-        ((self.0 >> 12) & 0x07) as u8
-    }
-
-    pub fn rs1(&self) -> Register {
-        Register::try_from(self.0 >> 15 & 0x1f).expect("rs1 must occupy exactly 5 bits")
-    }
-
-    pub fn rd(&self) -> Register {
-        Register::try_from(self.0 >> 7 & 0x1f).expect("rd must occupy exactly 5 bits")
-    }
+    impl_opcode!();
+    impl_funct3!();
+    impl_rs1!();
+    impl_rd!();
 
     pub fn immediate(&self) -> i32 {
         // XXX(mdlayher): I'm pretty sure this is still wrong.
@@ -235,28 +264,14 @@ impl fmt::Display for ITypeInst {
 pub struct RType(u32);
 
 impl RType {
-    fn opcode(&self) -> u8 {
-        (self.0 & 0x7f) as u8
-    }
-
-    fn funct3(&self) -> u8 {
-        ((self.0 >> 12) & 0x07) as u8
-    }
+    impl_opcode!();
+    impl_funct3!();
+    impl_rs1!();
+    impl_rs2!();
+    impl_rd!();
 
     fn funct7(&self) -> u8 {
         ((self.0 >> 25) & 0x7f) as u8
-    }
-
-    pub fn rs1(&self) -> Register {
-        Register::try_from(self.0 >> 15 & 0x1f).expect("rs1 must occupy exactly 5 bits")
-    }
-
-    pub fn rs2(&self) -> Register {
-        Register::try_from(self.0 >> 20 & 0xf).expect("rs2 must occupy exactly 4 bits")
-    }
-
-    pub fn rd(&self) -> Register {
-        Register::try_from(self.0 >> 7 & 0x1f).expect("rd must occupy exactly 5 bits")
     }
 }
 
@@ -313,21 +328,10 @@ impl fmt::Display for RTypeInst {
 pub struct SType(u32);
 
 impl SType {
-    fn opcode(&self) -> u8 {
-        (self.0 & 0x7f) as u8
-    }
-
-    fn funct3(&self) -> u8 {
-        ((self.0 >> 12) & 0x07) as u8
-    }
-
-    fn rs1(&self) -> Register {
-        Register::try_from(self.0 >> 15 & 0x1f).expect("rs1 must occupy exactly 5 bits")
-    }
-
-    fn rs2(&self) -> Register {
-        Register::try_from(self.0 >> 20 & 0xf).expect("rs2 must occupy exactly 4 bits")
-    }
+    impl_opcode!();
+    impl_funct3!();
+    impl_rs1!();
+    impl_rs2!();
 
     fn immediate(&self) -> i32 {
         // XXX(mdlayher): I'm pretty sure this is still wrong.
@@ -389,13 +393,8 @@ impl fmt::Display for STypeInst {
 pub struct UType(u32);
 
 impl UType {
-    fn opcode(&self) -> u8 {
-        (self.0 & 0x7f) as u8
-    }
-
-    pub fn rd(&self) -> Register {
-        Register::try_from(self.0 >> 7 & 0x1f).expect("rd must occupy exactly 5 bits")
-    }
+    impl_opcode!();
+    impl_rd!();
 
     pub fn immediate(&self) -> u32 {
         self.0 >> 12
