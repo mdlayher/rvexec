@@ -143,6 +143,7 @@ impl fmt::Display for Register {
 pub enum Instruction {
     B(BType),
     I(IType),
+    J(JType),
     R(RType),
     S(SType),
     U(UType),
@@ -161,6 +162,7 @@ impl TryFrom<u32> for Instruction {
         match masked {
             0b0110_0011 => Ok(Self::B(BType(value))),
             0b0001_0011 | 0b0111_0011 | 0b0000_0011 | 0b0110_0111 => Ok(Self::I(IType(value))),
+            0b0110_1111 => Ok(Self::J(JType(value))),
             0b0011_0011 => Ok(Self::R(RType(value))),
             0b0010_0011 => Ok(Self::S(SType(value))),
             0b0001_1011 | 0b0001_0111 => Ok(Self::U(UType(value))),
@@ -174,6 +176,7 @@ impl fmt::Display for Instruction {
         match self {
             Self::B(btype) => btype.fmt(f),
             Self::I(itype) => itype.fmt(f),
+            Self::J(jtype) => jtype.fmt(f),
             Self::R(rtype) => rtype.fmt(f),
             Self::S(stype) => stype.fmt(f),
             Self::U(utype) => utype.fmt(f),
@@ -276,6 +279,7 @@ impl TryFrom<&IType> for ITypeInst {
             },
             0b0000_0011 => match value.funct3() {
                 0x0 => Ok(ITypeInst::LB),
+                0x2 => Ok(ITypeInst::LW),
                 _ => Err(anyhow!(
                     "unhandled I-Type load funct3: {:#02x}",
                     value.funct3()
@@ -342,6 +346,7 @@ pub enum ITypeInst {
     ECALL,
     JALR,
     LB,
+    LW,
 }
 
 impl fmt::Display for ITypeInst {
@@ -352,6 +357,70 @@ impl fmt::Display for ITypeInst {
             Self::ECALL => "ecall",
             Self::JALR => "jalr",
             Self::LB => "lb",
+            Self::LW => "lw",
+        };
+
+        write!(f, "{}", op)
+    }
+}
+
+#[derive(Debug)]
+pub struct JType(u32);
+
+impl JType {
+    impl_opcode!();
+    impl_rd!();
+
+    pub fn immediate(&self) -> i32 {
+        let imm20 = self.0 >> 31;
+        let imm10_1 = (self.0 >> 21) & 0x3ff;
+        let imm11 = (self.0 >> 20) & 0x1;
+        let imm19_12 = (self.0 >> 12) & 0xff;
+
+        // Reassemble the 20 bit immediate with 12 bits of upper padding. Then
+        // shift left and convert to i32->i64 to sign extend. Drop the extra
+        // bits by converting back to i32 and shifting down, multiplying the
+        // final result by 2 for the real offset.
+        //
+        // This is terrible, there's certainly a better way.
+        let imm = imm20 << 19 | imm19_12 << 11 | imm11 << 10 | imm10_1;
+        let imm = ((imm << 12) as i32 as i64 as i32) >> 12;
+
+        2 * imm
+    }
+}
+
+impl TryFrom<&JType> for JTypeInst {
+    type Error = Error;
+
+    fn try_from(value: &JType) -> Result<Self, Self::Error> {
+        match value.opcode() {
+            0b0110_1111 => Ok(Self::JAL),
+            _ => Err(anyhow!("unhandled J-Type opcode: {:#02x}", value.opcode())),
+        }
+    }
+}
+
+impl fmt::Display for JType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match JTypeInst::try_from(self) {
+            Ok(inst) => match inst {
+                JTypeInst::JAL => write!(f, "{} {}, {}", inst, self.rd(), self.immediate()),
+            },
+            Err(_) => write!(f, "jtype(???) {}, {}", self.rd(), self.immediate(),),
+        }
+    }
+}
+
+#[allow(clippy::upper_case_acronyms)]
+pub enum JTypeInst {
+    JAL,
+}
+
+impl fmt::Display for JTypeInst {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let op = match self {
+            Self::JAL => "jal",
         };
 
         write!(f, "{}", op)
@@ -446,6 +515,7 @@ impl TryFrom<&SType> for STypeInst {
     fn try_from(value: &SType) -> Result<Self, Self::Error> {
         match value.opcode() {
             0b0010_0011 => match value.funct3() {
+                0x2 => Ok(Self::SW),
                 0x3 => Ok(Self::SD),
                 _ => Err(anyhow!("unhandled S-Type funct3: {:#02x}", value.funct3())),
             },
@@ -457,16 +527,14 @@ impl TryFrom<&SType> for STypeInst {
 impl fmt::Display for SType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match STypeInst::try_from(self) {
-            Ok(inst) => match inst {
-                STypeInst::SD => write!(
-                    f,
-                    "{} {}, {}({})",
-                    inst,
-                    self.rs2(),
-                    self.immediate(),
-                    self.rs1()
-                ),
-            },
+            Ok(inst) => write!(
+                f,
+                "{} {}, {}({})",
+                inst,
+                self.rs2(),
+                self.immediate(),
+                self.rs1()
+            ),
             Err(_) => write!(f, "stype(???)"),
         }
     }
@@ -475,12 +543,14 @@ impl fmt::Display for SType {
 #[allow(clippy::upper_case_acronyms)]
 pub enum STypeInst {
     SD,
+    SW,
 }
 
 impl fmt::Display for STypeInst {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let op = match self {
             Self::SD => "sd",
+            Self::SW => "sw",
         };
 
         write!(f, "{}", op)
@@ -500,7 +570,7 @@ impl UType {
 }
 
 impl TryFrom<&UType> for UTypeInst {
-    type Error = anyhow::Error;
+    type Error = Error;
 
     fn try_from(value: &UType) -> Result<Self, Self::Error> {
         match value.opcode() {
@@ -597,6 +667,16 @@ fn test_instruction_ecall() {
 }
 
 #[test]
+fn test_instruction_jal() {
+    let tests = [(0x0300006f, "jal x0, 48"), (0xfc1ff0ef, "jal ra, -64")];
+
+    for test in tests {
+        let inst = Instruction::try_from(test.0).unwrap();
+        assert_eq!(test.1, inst.to_string());
+    }
+}
+
+#[test]
 fn test_instruction_jalr() {
     let tests = [(0x00008067, "jalr x0, 0(ra)")];
 
@@ -617,11 +697,39 @@ fn test_instruction_lb() {
 }
 
 #[test]
+fn test_instruction_lw() {
+    let tests = [
+        (0x00c12083, "lw ra, sp, 12"),
+        (0xff442503, "lw a0, s0, -12"),
+        (0x00812403, "lw s0, sp, 8"),
+    ];
+
+    for test in tests {
+        let inst = Instruction::try_from(test.0).unwrap();
+        assert_eq!(test.1, inst.to_string());
+    }
+}
+
+#[test]
 fn test_instruction_sd() {
     let tests = [
         (0x00813c23, "sd s0, 24(sp)"),
         (0x00113423, "sd ra, 8(sp)"),
         (0x00813023, "sd s0, 0(sp)"),
+    ];
+
+    for test in tests {
+        let inst = Instruction::try_from(test.0).unwrap();
+        assert_eq!(test.1, inst.to_string());
+    }
+}
+
+#[test]
+fn test_instruction_sw() {
+    let tests = [
+        (0xfea42a23, "sw a0, -12(s0)"),
+        (0x00812423, "sw s0, 8(sp)"),
+        (0x00112623, "sw ra, 12(sp)"),
     ];
 
     for test in tests {

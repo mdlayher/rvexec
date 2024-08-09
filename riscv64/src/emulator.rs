@@ -40,6 +40,10 @@ impl Emulator {
                         // Program called exit(2).
                         return Ok(code as usize);
                     }
+                    cpu::Error::Eof => {
+                        // End of program.
+                        return Ok(0);
+                    }
                     _ => {
                         // All other errors return well-formatted messages.
                         return Err(Error::Runtime(err));
@@ -51,8 +55,8 @@ impl Emulator {
 }
 
 // Loads an ELF binary into memory owned by the Bus. Returns the entry point
-// address for the CPU to begin execution.
-fn load_elf(bus: &mut Bus, buf: &[u8]) -> Result<usize> {
+// address and end of program address for the CPU to begin execution.
+fn load_elf(bus: &mut Bus, buf: &[u8]) -> Result<(usize, usize)> {
     // The CPU assumes ELF riscv64/little-endian/executable.
     let elf_bytes = ElfBytes::<LittleEndian>::minimal_parse(buf)
         .map_err(|err| Error::InvalidBinary(anyhow!("failed to read ELF binary: {err}")))?;
@@ -65,6 +69,10 @@ fn load_elf(bus: &mut Bus, buf: &[u8]) -> Result<usize> {
         "found no ELF program segments"
     )))?;
 
+    // Look for the program entry and exit points.
+    let entry = elf_bytes.ehdr.e_entry as usize;
+    let mut pc: (usize, usize) = (entry, 0);
+
     for ph in program_headers
         .iter()
         .filter(|ph| ph.p_type == abi::PT_LOAD)
@@ -73,15 +81,19 @@ fn load_elf(bus: &mut Bus, buf: &[u8]) -> Result<usize> {
         // load the program code and data into memory.
         let offset = ph.p_offset as usize;
 
-        bus.copy_from_exact(
+        let (start, end) = bus.copy_from_exact(
             ph.p_vaddr as usize,
             ph.p_memsz as usize,
             &buf[offset..offset + ph.p_filesz as usize],
-        )
+        );
+
+        if entry >= start && entry <= end {
+            // This PT_LOAD section encompasses the entrypoint.
+            pc.1 = end;
+        }
     }
 
-    // Start PC at the entrypoint.
-    Ok(elf_bytes.ehdr.e_entry as usize)
+    Ok(pc)
 }
 
 // Verifies an ELF binary is a riscv64 executable with extensions supported by

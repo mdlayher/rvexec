@@ -24,8 +24,9 @@ impl Bus {
         &self.memory[addr..addr + len]
     }
 
-    pub fn copy_from_exact(&mut self, addr: usize, len: usize, src: &[u8]) {
-        self.memory[addr..addr + len].copy_from_slice(src)
+    pub fn copy_from_exact(&mut self, addr: usize, len: usize, src: &[u8]) -> (usize, usize) {
+        self.memory[addr..addr + len].copy_from_slice(src);
+        (addr, addr + len)
     }
 
     pub fn store_u32(&mut self, addr: usize, value: u32) {
@@ -40,11 +41,11 @@ impl Bus {
         self.memory[addr] as i8
     }
 
-    pub fn load_u32(&self, addr: usize) -> u32 {
-        LittleEndian::read_u32(&self.memory[addr..addr + 4])
+    pub fn load_i32(&self, addr: usize) -> i32 {
+        LittleEndian::read_i32(&self.memory[addr..addr + 4])
     }
 
-    pub fn load_u64(&self, addr: usize) -> u64 {
-        LittleEndian::read_u64(&self.memory[addr..addr + 8])
+    pub fn load_u32(&self, addr: usize) -> u32 {
+        LittleEndian::read_u32(&self.memory[addr..addr + 4])
     }
 }

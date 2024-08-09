@@ -1,14 +1,21 @@
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let path = "./asm/hello/hello.elf";
+    let args: Vec<String> = env::args().collect();
+
+    // Default program for testing, or use one specified by CLI.
+    let mut path = "./asm/loop/loop.elf";
+    if args.len() == 2 {
+        path = args[1].as_str();
+    }
 
     let file = match fs::read(PathBuf::from(path)) {
         Ok(file) => file,
         Err(err) => {
-            println!("rvexec: failed to open file: {}", err);
+            println!("rvexec: failed to open file {}: {}", path, err);
             return ExitCode::from(1);
         }
     };
