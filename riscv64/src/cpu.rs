@@ -174,7 +174,10 @@ impl Cpu {
         };
 
         match inst {
-            asm::RTypeInst::ADD | asm::RTypeInst::SUB => self.execute_rtype_arithmetic(inst, rtype),
+            // TODO(mdlayher): I'm sure addw is wrong.
+            asm::RTypeInst::ADD | asm::RTypeInst::ADDW | asm::RTypeInst::SUB => {
+                self.execute_rtype_arithmetic(inst, rtype)
+            }
         }
 
         Ok(ExecuteState::default())
@@ -186,7 +189,7 @@ impl Cpu {
         let rs2 = self.read_register(rtype.rs2());
 
         let res = match inst {
-            asm::RTypeInst::ADD => rs1 + rs2,
+            asm::RTypeInst::ADD | asm::RTypeInst::ADDW => rs1 + rs2,
             asm::RTypeInst::SUB => rs1 - rs2,
         };
 

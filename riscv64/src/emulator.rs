@@ -108,12 +108,11 @@ fn check_headers(elf_bytes: &ElfBytes<LittleEndian>) -> anyhow::Result<()> {
 
     let arch = parse_section_headers_arch(elf_bytes)
         .map_err(|err| anyhow!("failed to find RISC-V arch in ELF attributes: {err}"))?;
-    if arch.as_str() != "rv64i2p0" {
-        // TODO(mdlayher): broaden extension support.
-        return Err(anyhow!("unsupported riscv64 arch value: {arch}"));
-    };
 
-    Ok(())
+    match arch.as_str() {
+        "rv64i2p0" | "rv64i2p1" => Ok(()),
+        _ => Err(anyhow!("unsupported riscv64 arch value: {arch}")),
+    }
 }
 
 // Parses RISC-V ELF attributes to find the arch string indicating which
@@ -173,6 +172,7 @@ fn parse_section_headers_arch(elf_bytes: &ElfBytes<LittleEndian>) -> anyhow::Res
 
     match &tags[0].value {
         rvelf::AttributeValue::String(s) => Ok(s.clone()),
+        rvelf::AttributeValue::Todo => Ok("todo".to_string()),
     }
 }
 

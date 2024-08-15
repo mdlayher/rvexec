@@ -28,6 +28,7 @@ pub struct AttributesTag {
 
 #[derive(Debug)]
 pub enum AttributeValue {
+    Todo,
     String(String),
 }
 
@@ -108,7 +109,10 @@ impl<'a> AttributeParser<'a> {
         // Per docs, even values are integers, odd values are NTBS.
         let value = if tag % 2 == 0 {
             // XXX(mdlayher): what format are these in?
-            panic!("rvexec: TODO integer values")
+            return Ok(Some(AttributesTag {
+                tag,
+                value: AttributeValue::Todo,
+            }));
         } else {
             AttributeValue::String(self.read_ntbs()?)
         };

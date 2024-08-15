@@ -163,7 +163,7 @@ impl TryFrom<u32> for Instruction {
             0b0110_0011 => Ok(Self::B(BType(value))),
             0b0001_0011 | 0b0111_0011 | 0b0000_0011 | 0b0110_0111 => Ok(Self::I(IType(value))),
             0b0110_1111 => Ok(Self::J(JType(value))),
-            0b0011_0011 => Ok(Self::R(RType(value))),
+            0b0011_1011 | 0b0011_0011 => Ok(Self::R(RType(value))),
             0b0010_0011 => Ok(Self::S(SType(value))),
             0b0001_1011 | 0b0001_0111 => Ok(Self::U(UType(value))),
             _ => Err(anyhow!("no matching opcode: {:#02x}", masked)),
@@ -445,11 +445,7 @@ impl RType {
 impl fmt::Display for RType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match RTypeInst::try_from(self) {
-            Ok(inst) => match inst {
-                RTypeInst::ADD | RTypeInst::SUB => {
-                    write!(f, "{} {}, {}, {}", inst, self.rd(), self.rs1(), self.rs2())
-                }
-            },
+            Ok(inst) => write!(f, "{} {}, {}, {}", inst, self.rd(), self.rs1(), self.rs2()),
             Err(_) => write!(f, "rtype(???)"),
         }
     }
@@ -458,6 +454,7 @@ impl fmt::Display for RType {
 #[allow(clippy::upper_case_acronyms)]
 pub enum RTypeInst {
     ADD,
+    ADDW,
     SUB,
 }
 
@@ -470,7 +467,15 @@ impl TryFrom<&RType> for RTypeInst {
                 (0x0, 0x00) => Ok(Self::ADD),
                 (0x0, 0x20) => Ok(Self::SUB),
                 _ => Err(anyhow!(
-                    "unhandled R-Type funct3: {:#02x}, funct7: {:#02x}",
+                    "unhandled R-Type rv32i funct3: {:#02x}, funct7: {:#02x}",
+                    value.funct3(),
+                    value.funct7()
+                )),
+            },
+            0b0011_1011 => match (value.funct3(), value.funct7()) {
+                (0x00, 0x00) => Ok(Self::ADDW),
+                _ => Err(anyhow!(
+                    "unhandled R-Type rv64i funct3: {:#02x}, funct7: {:#02x}",
                     value.funct3(),
                     value.funct7()
                 )),
@@ -484,6 +489,7 @@ impl fmt::Display for RTypeInst {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let op = match self {
             Self::ADD => "add",
+            Self::ADDW => "addw",
             Self::SUB => "sub",
         };
 
